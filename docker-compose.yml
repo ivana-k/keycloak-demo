@@ -1,0 +1,89 @@
+services:
+  postgres:
+    image: 'postgres:latest'
+    environment:
+      - 'POSTGRES_DB=keycloakdb'
+      - 'POSTGRES_PASSWORD=admin'
+      - 'POSTGRES_USER=admin'
+    ports:
+      - '5433:5432'
+    networks:
+      - app-network
+
+  postgres-iam:
+    image: 'postgres:latest'
+    container_name: postgres-iam
+    environment:
+      - 'POSTGRES_DB=mydb'
+      - 'POSTGRES_PASSWORD=admin'
+      - 'POSTGRES_USER=admin'
+    ports:
+      - '5434:5432'
+    networks:
+      - app-network
+
+  keycloak:
+    container_name: keycloak
+    image: quay.io/keycloak/keycloak:26.3.3
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloakdb
+      KC_DB_USERNAME: admin
+      KC_DB_PASSWORD: admin
+      KC_HOSTNAME_STRICT: false
+      KC_HTTP_ENABLED: true
+      KC_HOSTNAME: http://localhost:8080/
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: true
+    ports:
+      - "8080:8080"
+    command: [ "start-dev" ]
+    depends_on:
+      - postgres
+    networks:
+      - app-network
+
+  iam:
+    build:
+      context: ./iam
+      dockerfile: Dockerfile
+    container_name: iam-backend
+    ports:
+      - "8081:8081"
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres-iam:5432/mydb
+      SPRING_DATASOURCE_USERNAME: admin
+      SPRING_DATASOURCE_PASSWORD: admin
+      #SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://localhost:8080/realms/iam-example
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_JWK_SET_URI: http://keycloak:8080/realms/iam-example/protocol/openid-connect/certs
+    depends_on:
+      - postgres
+      - keycloak
+    networks:
+      - app-network
+
+  iam-client:
+    build:
+      context: ./iam-client
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_KEYCLOAK_URL: ${NEXT_PUBLIC_KEYCLOAK_URL}
+        NEXT_PUBLIC_SERVER_URL: ${NEXT_PUBLIC_SERVER_URL}
+        NEXT_PUBLIC_KEYCLOAK_REALM: ${NEXT_PUBLIC_KEYCLOAK_REALM}
+        NEXT_PUBLIC_KEYCLOAK_CLIENT: ${NEXT_PUBLIC_KEYCLOAK_CLIENT}
+    container_name: iam-client
+    
+    ports:
+      - "3000:3000"
+    env_file:
+      - ./iam-client/.env
+    depends_on:
+      - keycloak
+    networks:
+      - app-network
+    restart: unless-stopped
+
+networks:
+    app-network:
+      driver: bridge
